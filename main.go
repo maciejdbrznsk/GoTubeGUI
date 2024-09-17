@@ -18,7 +18,7 @@ import (
 	"strconv"
 )
 
-var ytDlp = "/home/maciej/GolandProjects/GoTubeGUI/yt-dlp"
+var ytDlp = "./yt-dlp"
 var downloadPath = getDefaultDownloadPath()
 
 type videoInfo struct {
@@ -52,7 +52,8 @@ func main() {
 	scrollableDescription.SetMinSize(fyne.NewSize(400, 550))
 
 	Progress := widget.NewProgressBar()
-	ProgressText := widget.NewLabel("0%")
+	ProgressText := widget.NewLabel("")
+	StatusText := widget.NewLabel("")
 
 	progressChan := make(chan float64)
 
@@ -73,7 +74,7 @@ func main() {
 
 		go func() {
 			Progress.SetValue(0)
-			ProgressText.SetText("Fetching info...")
+			StatusText.SetText("Fetching info...")
 
 			videoInfo, err := getVideoInfo(url)
 			if err != nil {
@@ -83,20 +84,16 @@ func main() {
 
 			videoTitle.SetText("Title: " + videoInfo.Title)
 			videoDescription.SetText("Description: " + videoInfo.Description)
-			ProgressText.SetText("Info fetched")
+			StatusText.SetText("Info fetched")
 			Progress.SetValue(100)
 		}()
 	})
 
 	downloadButton := widget.NewButton("Download", func() {
 		url := urlEntry.Text
-		re := regexp.MustCompile(`^https?://(www\.)?(youtube\.com|youtu\.be)/.+$`)
 
 		if url == "" {
 			dialog.ShowInformation("Error", "Incorrect URL", myWindow)
-			return
-		} else if !re.MatchString(url) {
-			dialog.ShowError(fmt.Errorf("Invalid YouTube URL"), myWindow)
 			return
 		} else if downloadPath == "" {
 			dialog.ShowInformation("Error", "Incorrect Download Path", myWindow)
@@ -120,13 +117,14 @@ func main() {
 	leftSide := container.NewVBox(
 		widget.NewLabel("Paste YouTube link"),
 		urlEntry,
+		widget.NewSeparator(),
 		selectFolderButton,
 		downloadPathLabel,
 		downloadButton,
 		fetchVideoInfoButton,
 		widget.NewSeparator(),
 		Progress,
-		ProgressText,
+		StatusText,
 	)
 
 	rightSide := container.NewVBox(
@@ -164,7 +162,7 @@ func downloadVideo(url, downloadPath string, progressChan chan float64) error {
 		if len(matches) > 0 {
 			progressPercent, _ := strconv.ParseFloat(matches[1], 64)
 
-			roundedProgress := round(progressPercent)
+			roundedProgress := math.Round(progressPercent)
 			progressChan <- roundedProgress / 100
 		}
 	}
@@ -192,8 +190,6 @@ func getVideoInfo(url string) (videoInfo, error) {
 		return videoInfo{}, fmt.Errorf("Error while downloading video information: %v, %s", err, string(output))
 	}
 
-	fmt.Println("Raw yt-dlp output:", string(output))
-
 	var info videoInfo
 
 	if err := json.Unmarshal(output, &info); err != nil {
@@ -201,8 +197,4 @@ func getVideoInfo(url string) (videoInfo, error) {
 	}
 
 	return info, nil
-}
-
-func round(val float64) float64 {
-	return math.Round(val)
 }
