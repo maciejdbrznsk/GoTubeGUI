@@ -183,7 +183,10 @@ func getDefaultDownloadPath() string {
 }
 
 func getVideoInfo(url string) (videoInfo, error) {
-	cmd := exec.Command(ytDlp, "-j", "--skip-download", url)
+	// --no-warnings is there to work around the "W" error
+	// The correct solution would be to add FFMPEG
+	// Also, show the output variable in case of an error
+	cmd := exec.Command(ytDlp, "-j", "--skip-download", "--no-warnings", url)
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {
