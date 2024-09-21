@@ -1,3 +1,10 @@
+# App files
 yt-dlp*
 GoTubeGUI*
+upx*
+
+# IDE files
 .idea/
+
+# Output
+release-out/
