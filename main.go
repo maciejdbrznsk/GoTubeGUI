@@ -145,6 +145,7 @@ func main() {
 func downloadVideo(url, downloadPath string, progressChan chan float64) error {
 	cmd := exec.Command(ytDlp, "-P", downloadPath, url, "--newline")
 	stdout, err := cmd.StdoutPipe()
+	cmd.SysProcAttr = getOSSysProcAttr()
 	if err != nil {
 		return fmt.Errorf("Error starting download: %v", err)
 	}
@@ -187,6 +188,7 @@ func getVideoInfo(url string) (videoInfo, error) {
 	// The correct solution would be to add FFMPEG
 	// Also, show the output variable in case of an error
 	cmd := exec.Command(ytDlp, "-j", "--skip-download", "--no-warnings", url)
+	cmd.SysProcAttr = getOSSysProcAttr()
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {

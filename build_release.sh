@@ -1,6 +1,7 @@
 LDFLAGS="-s -w"
 
 if [ "$GOOS" = "windows" ]; then
+  LDFLAGS="$LDFLAGS -H=windowsgui" # Don't show the cmd on Windows builds
   YT_DLP_DL="yt-dlp.exe"
   YT_DLP="yt-dlp.exe"
   GTG_NOUPX="GoTubeGUI-noupx.exe"
