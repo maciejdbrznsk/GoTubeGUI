@@ -1,16 +1,18 @@
 LDFLAGS="-s -w"
 
+YT_DLP_DL="yt-dlp"
+YT_DLP="yt-dlp"
+GTG_NOUPX="GoTubeGUI-noupx"
+GTG_UPX="GoTubeGUI-upx"
+
 if [ "$GOOS" = "windows" ]; then
-  LDFLAGS="$LDFLAGS -H=windowsgui" # Don't show the cmd on Windows builds
-  YT_DLP_DL="yt-dlp.exe"
-  YT_DLP="yt-dlp.exe"
-  GTG_NOUPX="GoTubeGUI-noupx.exe"
-  GTG_UPX="GoTubeGUI-upx.exe"
+  LDFLAGS="$LDFLAGS -H=windowsgui"
+  YT_DLP_DL="$YT_DLP_DL.exe"
+  YT_DLP="$YT_DLP.exe"
+  GTG_NOUPX="$GTG_NOUPX.exe"
+  GTG_UPX="$GTG_UPX.exe"
 elif [ "$GOOS" = "linux" ]; then
-  YT_DLP_DL="yt-dlp_linux"
-  YT_DLP="yt-dlp"
-  GTG_NOUPX="GoTubeGUI-noupx"
-  GTG_UPX="GoTubeGUI-upx"
+  YT_DLP_DL="${YT_DLP_DL}_linux"
 else
   echo "Set the GOOS environment variable!"
   exit
@@ -35,4 +37,5 @@ if [ -f "upx" ] || [ -f "upx.exe" ]; then
   ./upx -o"release-out/$GTG_UPX" -f "release-out/$GTG_NOUPX"
 else
   echo "upx doesn't exist. Not compressing!"
+  exit
 fi
