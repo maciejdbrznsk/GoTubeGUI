@@ -24,7 +24,7 @@ mkdir -p release-out
 # TODO: This should be handled by GoTubeGUI itself!!!
 if [ ! -f "release-out/$YT_DLP" ]; then
   echo "$YT_DLP doesn't exist, downloading..."
-  curl -L "https://github.com/yt-dlp/yt-dlp/releases/download/2024.08.06/$YT_DLP_DL" -o "release-out/$YT_DLP"
+  curl -L "https://github.com/yt-dlp/yt-dlp/releases/download/2024.10.22/$YT_DLP_DL" -o "release-out/$YT_DLP"
 fi
 
 
