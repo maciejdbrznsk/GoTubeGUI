@@ -35,15 +35,6 @@ type videoInfo struct {
 	Formats     []ytDlpFormat `json:"formats"`
 }
 
-type Format struct {
-	ID         string
-	Resolution string
-	FormatNote string
-	Extension  string
-	AudioOnly  bool
-	Bitrate    int
-}
-
 type ytDlpFormat struct {
 	FormatID   string  `json:"format_id"`
 	Resolution string  `json:"resolution"`
@@ -253,17 +244,30 @@ func getDefaultDownloadPath() string {
 }
 
 func getVideoInfo(url string) (videoInfo, error) {
-	cmd := exec.Command(ytDlp, "-j", "--skip-download", "--no-warnings", "--no-check-certificate", "\"--user-agent\", \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36", url)
-	cmd.SysProcAttr = getOSSysProcAttr()
+	cmd := exec.Command(ytDlp, "-j", "--skip-download", "--no-warnings", url)
 	output, err := cmd.CombinedOutput()
-
 	if err != nil {
-		return videoInfo{}, fmt.Errorf("Error while downloading video information: %v, %s", err, string(output))
+		return videoInfo{}, fmt.Errorf("error while running yt-dlp: %v, output: %s", err, string(output))
 	}
 
+	// Split the output into lines and find the first line that starts with '{'
+	var jsonData []byte
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if bytes.HasPrefix(line, []byte("{")) {
+			jsonData = line
+			break
+		}
+	}
+	if jsonData == nil {
+		return videoInfo{}, fmt.Errorf("no JSON found in output: %s", string(output))
+	}
+
+	// Parse the JSON data
 	var info videoInfo
-	if err := json.Unmarshal(output, &info); err != nil {
-		return videoInfo{}, fmt.Errorf("Error while parsing information: %v", err)
+	if err := json.Unmarshal(jsonData, &info); err != nil {
+		return videoInfo{}, fmt.Errorf("error while parsing information: %v\nRaw output:\n%s", err, string(output))
 	}
 
 	return info, nil
@@ -303,7 +307,6 @@ func getAvailableFormats(url string) ([]ytDlpFormat, error) {
 	return info.Formats, nil
 }
 
-// Funkcja wyciągająca unikalne rozdzielczości
 func getUniqueResolutions(formats []ytDlpFormat) []string {
 	resolutions := map[string]struct{}{}
 	for _, format := range formats {
