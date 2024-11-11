@@ -41,8 +41,8 @@ type ytDlpFormat struct {
 	Height     int     `json:"height"`
 	Width      int     `json:"width"`
 	Ext        string  `json:"ext"`
-	TBR        float32 `json:"tbr"` // total bitrate
-	ASR        int     `json:"asr"` // audio sample rate
+	TBR        float32 `json:"tbr"`
+	ASR        int     `json:"asr"`
 	FPS        float64 `json:"fps"`
 	VCodec     string  `json:"vcodec"`
 	ACodec     string  `json:"acodec"`
@@ -95,34 +95,37 @@ func main() {
 
 	fetchVideoInfoButton := widget.NewButton("Fetch Video Info", func() {
 		url := urlEntry.Text
-
 		if url == "" {
 			dialog.ShowInformation("Error", "Incorrect URL", myWindow)
 			return
 		}
 
 		go func() {
+			log.Println("Starting to fetch video info...")
 			Progress.SetValue(0)
 			StatusText.SetText("Fetching info...")
 
 			videoInfo, err := getVideoInfo(url)
 			if err != nil {
+				log.Println("Error fetching video info:", err)
 				dialog.ShowError(err, myWindow)
 				return
 			}
+
+			log.Println("Video info fetched successfully:", videoInfo)
 
 			videoTitle.SetText("Title: " + videoInfo.Title)
 			videoDescription.SetText("Description: " + videoInfo.Description)
 
-			// Pobierz dostępne formaty
 			formats, err := getAvailableFormats(url)
 			if err != nil {
+				log.Println("Error fetching formats:", err)
 				dialog.ShowError(err, myWindow)
 				return
 			}
 
-			// Użyj pobranych formatów do uzyskania listy rozdzielczości
 			resolutions := getUniqueResolutions(formats)
+			log.Println("Resolutions found:", resolutions)
 			resolutionSelect.Options = resolutions
 			resolutionSelect.Refresh()
 
@@ -200,6 +203,7 @@ func downloadVideo(url, downloadPath, resolution string, progressChan chan float
 		"--no-check-certificate",
 		url,
 	}
+
 	cmd := exec.Command(ytDlp, args...)
 	log.Println("Running download command:", cmd)
 
@@ -250,24 +254,17 @@ func getVideoInfo(url string) (videoInfo, error) {
 		return videoInfo{}, fmt.Errorf("error while running yt-dlp: %v, output: %s", err, string(output))
 	}
 
-	// Split the output into lines and find the first line that starts with '{'
-	var jsonData []byte
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if bytes.HasPrefix(line, []byte("{")) {
-			jsonData = line
-			break
-		}
-	}
-	if jsonData == nil {
-		return videoInfo{}, fmt.Errorf("no JSON found in output: %s", string(output))
+	startIdx := bytes.IndexByte(output, '{')
+	endIdx := bytes.LastIndexByte(output, '}')
+	if startIdx == -1 || endIdx == -1 {
+		return videoInfo{}, fmt.Errorf("unable to locate JSON in output")
 	}
 
-	// Parse the JSON data
+	jsonData := output[startIdx : endIdx+1]
+
 	var info videoInfo
 	if err := json.Unmarshal(jsonData, &info); err != nil {
-		return videoInfo{}, fmt.Errorf("error while parsing information: %v\nRaw output:\n%s", err, string(output))
+		return videoInfo{}, fmt.Errorf("error while parsing information: %v\nRaw output:\n%s", err, string(jsonData))
 	}
 
 	return info, nil
@@ -300,8 +297,16 @@ func getAvailableFormats(url string) ([]ytDlpFormat, error) {
 		return nil, fmt.Errorf("Error while downloading video information: %v, %s", err, string(output))
 	}
 
+	startIdx := bytes.IndexByte(output, '{')
+	endIdx := bytes.LastIndexByte(output, '}')
+	if startIdx == -1 || endIdx == -1 {
+		return nil, fmt.Errorf("unable to locate JSON in output")
+	}
+
+	jsonData := output[startIdx : endIdx+1]
+
 	var info videoInfo
-	if err := json.Unmarshal(output, &info); err != nil {
+	if err := json.Unmarshal(jsonData, &info); err != nil {
 		return nil, fmt.Errorf("Error while parsing information: %v", err)
 	}
 	return info.Formats, nil
