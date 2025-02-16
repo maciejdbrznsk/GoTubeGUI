@@ -22,7 +22,8 @@ import (
 )
 
 var ytdlp = "./yt-dlp"
-var resolutionFormatMap = make(map[string]string)
+var videoFormatMap = make(map[string]string)
+var audioFormatMap = make(map[string]string)
 
 type Format struct {
 	FormatID   string   `json:"format_id"`
@@ -44,208 +45,211 @@ type VideoInfo struct {
 	Title        string   `json:"title"`
 	Description  string   `json:"description"`
 	Formats      []Format `json:"formats"`
-	Storyboards  []Format
 	AudioOnly    []Format
 	VideoFormats []Format
 }
 
 func main() {
-	GTD := app.New()
-	window := GTD.NewWindow("GoTube Downloader")
-
+	myApp := app.New()
+	window := myApp.NewWindow("GoTube Downloader")
+	window.Resize(fyne.NewSize(1200, 600))
 	urlEntry := widget.NewEntry()
 	urlEntry.SetPlaceHolder("Paste video URL")
-	urlEntry.SetText("Paste video URL")
 	downloadPath, err := getDownloadPath()
 	if err != nil {
 		log.Fatal(err)
 	}
 	downloadPathLabel := widget.NewLabel(downloadPath)
-
 	var videoInfo VideoInfo
-
 	selectFolderButton := widget.NewButton("Select Folder", func() {
 		folder, err := dialog.Directory().Title("Select Folder").Browse()
 		if err != nil {
-			log.Println("Error has occurred:", err)
+			log.Println("Error:", err)
 			return
 		}
 		downloadPath = folder
 		downloadPathLabel.SetText(downloadPath)
 	})
-
-	videoTitle := widget.NewLabel("Video Title: ")
-	videoDescription := widget.NewLabel("Video Description: ")
-
+	videoTitle := widget.NewLabel("Title:")
+	videoDescription := widget.NewLabel("Description:")
 	thumbnailImage := canvas.NewImageFromResource(nil)
 	thumbnailImage.FillMode = canvas.ImageFillContain
 	description := container.NewScroll(videoDescription)
 	description.SetMinSize(fyne.NewSize(400, 550))
-
 	progress := widget.NewProgressBar()
 	progressText := widget.NewLabel("")
 	statusText := widget.NewLabel("")
 	progressChan := make(chan float64)
-
 	go func() {
 		for prog := range progressChan {
 			progress.SetValue(prog)
 			progressText.SetText(fmt.Sprintf("%.2f%%", prog*100))
 		}
 	}()
-
-	formatSelect := widget.NewSelect([]string{"mp4", "mkv", "webm", "mp3", "wav"}, nil)
-	formatSelect.SetSelected("mp4")
-
-	resolutionSelect := widget.NewSelect([]string{}, nil)
-
-	videoCheck := widget.NewCheck("Video", nil)
-	audioCheck := widget.NewCheck("Audio", nil)
-	storyboardCheck := widget.NewCheck("Storyboard", nil)
-
-	updateResolutionList(&videoInfo, videoCheck.Checked, audioCheck.Checked, storyboardCheck.Checked, resolutionSelect)
-
-	videoCheck = widget.NewCheck("Video", func(checked bool) {
-		updateResolutionList(&videoInfo, videoCheck.Checked, audioCheck.Checked, storyboardCheck.Checked, resolutionSelect)
-	})
-	audioCheck = widget.NewCheck("Audio", func(checked bool) {
-		updateResolutionList(&videoInfo, videoCheck.Checked, audioCheck.Checked, storyboardCheck.Checked, resolutionSelect)
-	})
-	storyboardCheck = widget.NewCheck("Storyboard", func(checked bool) {
-		updateResolutionList(&videoInfo, videoCheck.Checked, audioCheck.Checked, storyboardCheck.Checked, resolutionSelect)
-	})
-	videoCheck.SetChecked(true)
-	audioCheck.SetChecked(true)
-	storyboardCheck.SetChecked(true)
-
-	getVideoInfoButton := widget.NewButton("Get VideoInfo", func() {
+	mediaTypeRadio := widget.NewRadioGroup([]string{"Video + Audio", "Video", "Audio"}, nil)
+	mediaTypeRadio.SetSelected("Video + Audio")
+	videoQualitySelect := widget.NewSelect([]string{}, nil)
+	audioQualitySelect := widget.NewSelect([]string{}, nil)
+	fileFormatSelect := widget.NewSelect([]string{}, nil)
+	setFileFormatOptions := func(mediaType string) {
+		if mediaType == "Video" {
+			fileFormatSelect.Options = []string{"mp4", "mkv", "webm"}
+		} else if mediaType == "Audio" {
+			fileFormatSelect.Options = []string{"mp3", "wav", "m4a", "aac"}
+		} else if mediaType == "Video+Audio" {
+			fileFormatSelect.Options = []string{"mp4", "mkv", "webm"}
+		}
+		fileFormatSelect.Refresh()
+	}
+	mediaTypeRadio.OnChanged = func(selected string) {
+		if selected == "Video" {
+			videoQualitySelect.Show()
+			audioQualitySelect.Hide()
+		} else if selected == "Audio" {
+			videoQualitySelect.Hide()
+			audioQualitySelect.Show()
+		} else {
+			videoQualitySelect.Show()
+			audioQualitySelect.Show()
+		}
+		setFileFormatOptions(selected)
+	}
+	getVideoInfoButton := widget.NewButton("Get Video Info", func() {
 		inputURL := urlEntry.Text
 		if inputURL == "" {
 			dialog2.ShowInformation("Error", "Invalid URL", window)
 			return
 		}
-
 		go func() {
-			log.Println("Getting VideoInfo...")
 			progress.SetValue(0)
-			statusText.SetText("Getting VideoInfo...")
-
+			statusText.SetText("Getting video info...")
 			err := getVideoInfo(inputURL, &videoInfo)
 			if err != nil {
-				log.Println("Error has occurred:", err)
 				dialog2.ShowError(err, window)
 				return
 			}
-
-			log.Println("Getting VideoInfo: success")
 			videoTitle.SetText("Title: " + videoInfo.Title)
 			videoDescription.SetText("Description: " + videoInfo.Description)
-
+			updateVideoQualityList(&videoInfo, videoQualitySelect)
+			updateAudioQualityList(&videoInfo, audioQualitySelect)
 			statusText.SetText("Info fetched")
-			progress.SetValue(100)
+			progress.SetValue(1.0)
 		}()
 	})
-
-	downloadVideoButton := widget.NewButton("Download", func() {
+	downloadButton := widget.NewButton("Download", func() {
 		inputURL := urlEntry.Text
-		selectedDisplay := resolutionSelect.Selected
-		if inputURL == "" || selectedDisplay == "" {
-			dialog2.ShowInformation("Error", "Invalid URL or Resolution", window)
-			return
-		}
-		selectedFormatID, ok := resolutionFormatMap[selectedDisplay]
-		if !ok {
-			dialog2.ShowInformation("Error", "Selected format not found", window)
+		if inputURL == "" {
+			dialog2.ShowInformation("Error", "Invalid URL", window)
 			return
 		}
 		progress.SetValue(0)
-
+		mediaType := mediaTypeRadio.Selected
 		go func() {
-			err := downloadVideo(inputURL, selectedFormatID, downloadPath, progressChan, statusText)
-			if err != nil {
-				dialog2.ShowError(err, window)
-			} else {
-				dialog2.ShowInformation("Success", "Video Downloaded", window)
+			if mediaType == "Video" {
+				if videoQualitySelect.Selected == "" {
+					dialog2.ShowInformation("Error", "Select video quality", window)
+					return
+				}
+				formatID := videoFormatMap[videoQualitySelect.Selected]
+				err := downloadMedia(inputURL, formatID, downloadPath, progressChan, statusText, "", false, "")
+				if err != nil {
+					dialog2.ShowError(err, window)
+				} else {
+					dialog2.ShowInformation("Success", "Video downloaded", window)
+				}
+			} else if mediaType == "Audio" {
+				if audioQualitySelect.Selected == "" {
+					dialog2.ShowInformation("Error", "Select audio quality", window)
+					return
+				}
+				formatID := audioFormatMap[audioQualitySelect.Selected]
+				err := downloadMedia(inputURL, formatID, downloadPath, progressChan, statusText, "", true, fileFormatSelect.Selected)
+				if err != nil {
+					dialog2.ShowError(err, window)
+				} else {
+					dialog2.ShowInformation("Success", "Audio downloaded", window)
+				}
+			} else if mediaType == "Video+Audio" {
+				if videoQualitySelect.Selected == "" || audioQualitySelect.Selected == "" {
+					dialog2.ShowInformation("Error", "Select both video and audio quality", window)
+					return
+				}
+				videoFormatID := videoFormatMap[videoQualitySelect.Selected]
+				audioFormatID := audioFormatMap[audioQualitySelect.Selected]
+				combinedFormat := videoFormatID + "+" + audioFormatID
+				err := downloadMedia(inputURL, combinedFormat, downloadPath, progressChan, statusText, fileFormatSelect.Selected, false, "")
+				if err != nil {
+					dialog2.ShowError(err, window)
+				} else {
+					dialog2.ShowInformation("Success", "Video + Audio merged and downloaded", window)
+				}
 			}
 		}()
 	})
-
-	separator := widget.NewSeparator()
-
 	leftSide := container.NewVBox(
 		widget.NewLabel("Paste video URL"),
 		urlEntry,
-		widget.NewSeparator(),
 		selectFolderButton,
 		downloadPathLabel,
 		widget.NewSeparator(),
-		formatSelect,
+		widget.NewLabel("Select Media Type:"),
+		mediaTypeRadio,
+		widget.NewLabel("Video Quality:"),
+		videoQualitySelect,
+		widget.NewLabel("Audio Quality:"),
+		audioQualitySelect,
+		widget.NewLabel("Select file format:"),
+		fileFormatSelect,
 		widget.NewSeparator(),
-		container.NewHBox(videoCheck, audioCheck, storyboardCheck),
-		resolutionSelect,
-		downloadVideoButton,
+		downloadButton,
 		getVideoInfoButton,
-		widget.NewSeparator(),
 		progress,
 		progressText,
 		statusText,
 	)
-
 	rightSide := container.NewVBox(
 		thumbnailImage,
 		videoTitle,
-		separator,
 		description,
 	)
-
 	window.SetContent(container.NewHSplit(leftSide, rightSide))
-	window.Resize(fyne.NewSize(800, 600))
-	window.SetFixedSize(true)
 	window.ShowAndRun()
 }
 
-func updateResolutionList(info *VideoInfo, includeVideo, includeAudio, includeStoryboard bool, sel *widget.Select) {
-	resolutionFormatMap = make(map[string]string)
+func updateVideoQualityList(info *VideoInfo, sel *widget.Select) {
 	var options []string
-
-	if includeVideo {
-		for _, format := range info.VideoFormats {
-			if format.Width != nil && format.Height != nil {
-				fpsStr := "N/A"
-				if format.Fps != nil {
-					fpsStr = fmt.Sprintf("%.2f", *format.Fps)
-				}
-				vbrStr := "N/A"
-				if format.Vbr != nil {
-					vbrStr = fmt.Sprintf("%.2f", *format.Vbr)
-				}
-				display := fmt.Sprintf("Video: %s | FPS: %s | VBR: %s | Ext: %s", format.Resolution, fpsStr, vbrStr, format.Ext)
-				options = append(options, display)
-				resolutionFormatMap[display] = format.FormatID
+	videoFormatMap = make(map[string]string)
+	for _, format := range info.VideoFormats {
+		if format.Width != nil && format.Height != nil {
+			fpsStr := "N/A"
+			if format.Fps != nil {
+				fpsStr = fmt.Sprintf("%.2f", *format.Fps)
 			}
-		}
-	}
-
-	if includeAudio {
-		for _, format := range info.AudioOnly {
-			abrStr := "N/A"
-			if format.Abr != nil {
-				abrStr = fmt.Sprintf("%.2f", *format.Abr)
+			vbrStr := "N/A"
+			if format.Vbr != nil {
+				vbrStr = fmt.Sprintf("%.2f", *format.Vbr)
 			}
-			display := fmt.Sprintf("Audio: ABR: %s | Ext: %s", abrStr, format.Ext)
+			display := fmt.Sprintf("Video: %s | FPS: %s | VBR: %s", format.Resolution, fpsStr, vbrStr)
 			options = append(options, display)
-			resolutionFormatMap[display] = format.FormatID
+			videoFormatMap[display] = format.FormatID
 		}
 	}
+	sel.Options = options
+	sel.Refresh()
+}
 
-	if includeStoryboard {
-		for _, format := range info.Storyboards {
-			display := fmt.Sprintf("Storyboard: %s | Ext: %s", format.Resolution, format.Ext)
-			options = append(options, display)
-			resolutionFormatMap[display] = format.FormatID
+func updateAudioQualityList(info *VideoInfo, sel *widget.Select) {
+	var options []string
+	audioFormatMap = make(map[string]string)
+	for _, format := range info.AudioOnly {
+		abrStr := "N/A"
+		if format.Abr != nil {
+			abrStr = fmt.Sprintf("%.2f", *format.Abr)
 		}
+		display := fmt.Sprintf("Audio: ABR: %s", abrStr)
+		options = append(options, display)
+		audioFormatMap[display] = format.FormatID
 	}
-
 	sel.Options = options
 	sel.Refresh()
 }
@@ -256,27 +260,20 @@ func getVideoInfo(url string, info *VideoInfo) error {
 	if err != nil {
 		return err
 	}
-
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-
 	decoder := json.NewDecoder(stdout)
 	if err := decoder.Decode(info); err != nil && err != io.EOF {
 		return err
 	}
-	
 	for _, format := range info.Formats {
 		if format.Resolution == "audio only" {
 			info.AudioOnly = append(info.AudioOnly, format)
-		} else if format.Width == nil || format.Height == nil {
-			info.Storyboards = append(info.Storyboards, format)
-		} else {
+		} else if format.Width != nil && format.Height != nil {
 			info.VideoFormats = append(info.VideoFormats, format)
 		}
 	}
-
-	fmt.Printf("Video ID: %s\nTitle: %s\n", info.ID, info.Title)
 	return cmd.Wait()
 }
 
@@ -293,34 +290,36 @@ func splitCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	return 0, nil, nil
 }
 
-func downloadVideo(url, formatID, downloadPath string, progressChan chan float64, statusText *widget.Label) error {
-	formatOption := formatID
+func downloadMedia(url, formatID, downloadPath string, progressChan chan float64, statusText *widget.Label, mergeExt string, isAudioOnly bool, audioOutputFormat string) error {
 	outputPath := filepath.Join(downloadPath, "%(title)s.%(ext)s")
-	log.Printf("Download format: %s", formatOption)
-	log.Printf("Output Path: %s", outputPath)
 	args := []string{
 		"-o", outputPath,
-		"-f", formatOption,
+		"-f", formatID,
 		"--no-check-certificate",
-		"--merge-output-format", "mp4",
-		url,
 	}
+	if isAudioOnly {
+		args = append(args, "--extract-audio")
+		if audioOutputFormat != "" {
+			args = append(args, "--audio-format", audioOutputFormat)
+		}
+	}
+	if mergeExt != "" {
+		args = append(args, "--merge-output-format", mergeExt)
+	}
+	args = append(args, url)
 	cmd := exec.Command(ytdlp, args...)
-	log.Printf("Running command: %v", cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("error has occurred: %s", err)
+		return fmt.Errorf("Error: %s", err)
 	}
 	if err := cmd.Start(); err != nil {
-		log.Printf("Error has occurred: %s", err)
-		return fmt.Errorf("error has occurred: %v", err)
+		return fmt.Errorf("Error: %v", err)
 	}
-	re := regexp.MustCompile(`(?i)\[download\]\s+(\d+(?:\.\d+)?)%\s+of\s+([\d.]+\s*[KMGT]iB)(?:\s+in\s+([\d:]+))?\s+at\s+([\d.]+\s*[KMGT]iB/s)(?:\s+ETA\s+([\d:]+))?`)
+	re := regexp.MustCompile(`(?i)\[download]\s+(\d+(?:\.\d+)?)%\s+of\s+(?:~\s+)?([\d.]+\s*[KMGT]iB)(?:\s+in\s+([\d:]+))?\s+at\s+([\d.]+\s*[KMGT]iB/s)(?:\s+ETA\s+([\d:]+))?`)
 	scanner := bufio.NewScanner(stdout)
 	scanner.Split(splitCRLF)
 	for scanner.Scan() {
 		line := scanner.Text()
-		log.Println(line)
 		matches := re.FindStringSubmatch(line)
 		if len(matches) >= 2 {
 			progressValue := matches[1]
@@ -337,18 +336,13 @@ func downloadVideo(url, formatID, downloadPath string, progressChan chan float64
 				eta = matches[5]
 			}
 			statusText.SetText(fmt.Sprintf("Progress: %s%% | Total: %s | Speed: %s | ETA: %s", progressValue, totalSize, speed, eta))
-			prog, err := strconv.ParseFloat(progressValue, 64)
-			if err == nil {
+			if prog, err := strconv.ParseFloat(progressValue, 64); err == nil {
 				progressChan <- prog / 100.0
 			}
-		} else {
-			log.Println("Skipping line:", line)
 		}
 	}
 	if err := cmd.Wait(); err != nil {
-		log.Println("Error has occurred: ", err)
-		return fmt.Errorf("error has occurred: %v", err)
+		return fmt.Errorf("Error: %v", err)
 	}
-	log.Println("Finished downloading video.")
 	return nil
 }
