@@ -61,6 +61,7 @@ func main() {
 	}
 	downloadPathLabel := widget.NewLabel(downloadPath)
 	var videoInfo VideoInfo
+	log.Println(updateYtDlp())
 	selectFolderButton := widget.NewButton("Select Folder", func() {
 		folder, err := dialog.Directory().Title("Select Folder").Browse()
 		if err != nil {
