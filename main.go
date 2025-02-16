@@ -265,8 +265,7 @@ func getVideoInfo(url string, info *VideoInfo) error {
 	if err := decoder.Decode(info); err != nil && err != io.EOF {
 		return err
 	}
-
-	// Sortowanie formatów
+	
 	for _, format := range info.Formats {
 		if format.Resolution == "audio only" {
 			info.AudioOnly = append(info.AudioOnly, format)
