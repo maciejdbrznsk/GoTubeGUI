@@ -9,62 +9,70 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
+	dialog2 "fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
-	"image"
-	"image/jpeg"
+	"github.com/sqweek/dialog"
+	"io"
 	"log"
-	"math"
-	"net/http"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
+	"strings"
 )
 
-var ytDlp = "./yt-dlp"
-var ffmpegPath = "./ffmpeg"
-var downloadPath = getDefaultDownloadPath()
+var ytdlp = "./yt-dlp"
+var defaultURL = "https://www.youtube.com/watch?v=MXWSn8rMeEo&list=WL&index=9&t=184s"
+var resolutionFormatMap = make(map[string]string)
 
-type videoInfo struct {
-	Title       string        `json:"title"`
-	Description string        `json:"description"`
-	Thumbnail   string        `json:"thumbnail"`
-	Formats     []ytDlpFormat `json:"formats"`
+type Format struct {
+	FormatID   string   `json:"format_id"`
+	FormatNote string   `json:"format_note"`
+	Ext        string   `json:"ext"`
+	Acodec     string   `json:"acodec"`
+	Vcodec     string   `json:"vcodec"`
+	Url        string   `json:"url"`
+	Width      *int     `json:"width"`
+	Height     *int     `json:"height"`
+	Fps        *float64 `json:"fps"`
+	Abr        *float64 `json:"abr"`
+	Vbr        *float64 `json:"vbr"`
+	Resolution string   `json:"resolution"`
 }
 
-type ytDlpFormat struct {
-	FormatID   string  `json:"format_id"`
-	Resolution string  `json:"resolution"`
-	Height     int     `json:"height"`
-	Width      int     `json:"width"`
-	Ext        string  `json:"ext"`
-	TBR        float32 `json:"tbr"`
-	ASR        int     `json:"asr"`
-	FPS        float64 `json:"fps"`
-	VCodec     string  `json:"vcodec"`
-	ACodec     string  `json:"acodec"`
-	Filesize   int64   `json:"filesize"`
+type VideoInfo struct {
+	ID           string   `json:"id"`
+	Title        string   `json:"title"`
+	Description  string   `json:"description"`
+	Formats      []Format `json:"formats"`
+	Storyboards  []Format
+	AudioOnly    []Format
+	VideoFormats []Format
 }
 
 func main() {
-	myApp := app.New()
-	myWindow := myApp.NewWindow("GoTube Downloader")
+	GTD := app.New()
+	window := GTD.NewWindow("GoTube Downloader")
 
 	urlEntry := widget.NewEntry()
-	urlEntry.SetPlaceHolder("Paste YouTube video link")
-
+	urlEntry.SetPlaceHolder("Paste video URL")
+	urlEntry.SetText(defaultURL)
+	downloadPath, err := getDownloadPath()
+	if err != nil {
+		log.Fatal(err)
+	}
 	downloadPathLabel := widget.NewLabel(downloadPath)
 
+	var videoInfo VideoInfo
+
 	selectFolderButton := widget.NewButton("Select Folder", func() {
-		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
-			if uri != nil {
-				downloadPath = uri.Path()
-				downloadPathLabel.SetText(downloadPath)
-			}
-		}, myWindow)
+		folder, err := dialog.Directory().Title("Select Folder").Browse()
+		if err != nil {
+			log.Println("Error has occurred:", err)
+			return
+		}
+		downloadPath = folder
+		downloadPathLabel.SetText(downloadPath)
 	})
 
 	videoTitle := widget.NewLabel("Video Title: ")
@@ -72,93 +80,93 @@ func main() {
 
 	thumbnailImage := canvas.NewImageFromResource(nil)
 	thumbnailImage.FillMode = canvas.ImageFillContain
-	scrollableDescription := container.NewScroll(videoDescription)
-	scrollableDescription.SetMinSize(fyne.NewSize(400, 550))
+	description := container.NewScroll(videoDescription)
+	description.SetMinSize(fyne.NewSize(400, 550))
 
-	Progress := widget.NewProgressBar()
-	ProgressText := widget.NewLabel("")
-	StatusText := widget.NewLabel("")
-
+	progress := widget.NewProgressBar()
+	progressText := widget.NewLabel("")
+	statusText := widget.NewLabel("")
 	progressChan := make(chan float64)
 
 	go func() {
-		for progress := range progressChan {
-			Progress.SetValue(progress)
-			ProgressText.SetText(fmt.Sprintf("%.2f%%", progress*100))
+		for prog := range progressChan {
+			progress.SetValue(prog)
+			progressText.SetText(fmt.Sprintf("%.2f%%", prog*100))
 		}
 	}()
 
-	formatSelect := widget.NewSelect([]string{"mp4", "mkv", "mp3", "wav"}, nil)
+	formatSelect := widget.NewSelect([]string{"mp4", "mkv", "webm", "mp3", "wav"}, nil)
 	formatSelect.SetSelected("mp4")
 
 	resolutionSelect := widget.NewSelect([]string{}, nil)
 
-	fetchVideoInfoButton := widget.NewButton("Fetch Video Info", func() {
-		url := urlEntry.Text
-		if url == "" {
-			dialog.ShowInformation("Error", "Incorrect URL", myWindow)
+	videoCheck := widget.NewCheck("Video", nil)
+	audioCheck := widget.NewCheck("Audio", nil)
+	storyboardCheck := widget.NewCheck("Storyboard", nil)
+
+	updateResolutionList(&videoInfo, videoCheck.Checked, audioCheck.Checked, storyboardCheck.Checked, resolutionSelect)
+
+	videoCheck = widget.NewCheck("Video", func(checked bool) {
+		updateResolutionList(&videoInfo, videoCheck.Checked, audioCheck.Checked, storyboardCheck.Checked, resolutionSelect)
+	})
+	audioCheck = widget.NewCheck("Audio", func(checked bool) {
+		updateResolutionList(&videoInfo, videoCheck.Checked, audioCheck.Checked, storyboardCheck.Checked, resolutionSelect)
+	})
+	storyboardCheck = widget.NewCheck("Storyboard", func(checked bool) {
+		updateResolutionList(&videoInfo, videoCheck.Checked, audioCheck.Checked, storyboardCheck.Checked, resolutionSelect)
+	})
+	videoCheck.SetChecked(true)
+	audioCheck.SetChecked(true)
+	storyboardCheck.SetChecked(true)
+
+	getVideoInfoButton := widget.NewButton("Get VideoInfo", func() {
+		inputURL := urlEntry.Text
+		if inputURL == "" {
+			dialog2.ShowInformation("Error", "Invalid URL", window)
 			return
 		}
 
 		go func() {
-			log.Println("Starting to fetch video info...")
-			Progress.SetValue(0)
-			StatusText.SetText("Fetching info...")
+			log.Println("Getting VideoInfo...")
+			progress.SetValue(0)
+			statusText.SetText("Getting VideoInfo...")
 
-			videoInfo, err := getVideoInfo(url)
+			err := getVideoInfo(inputURL, &videoInfo)
 			if err != nil {
-				log.Println("Error fetching video info:", err)
-				dialog.ShowError(err, myWindow)
+				log.Println("Error has occurred:", err)
+				dialog2.ShowError(err, window)
 				return
 			}
 
-			log.Println("Video info fetched successfully:", videoInfo)
-
+			log.Println("Getting VideoInfo: success")
 			videoTitle.SetText("Title: " + videoInfo.Title)
 			videoDescription.SetText("Description: " + videoInfo.Description)
 
-			formats, err := getAvailableFormats(url)
-			if err != nil {
-				log.Println("Error fetching formats:", err)
-				dialog.ShowError(err, myWindow)
-				return
-			}
-
-			resolutions := getUniqueResolutions(formats)
-			log.Println("Resolutions found:", resolutions)
-			resolutionSelect.Options = resolutions
-			resolutionSelect.Refresh()
-
-			thumbnail, err := fetchAndConvertThumbnail(videoInfo.Thumbnail)
-			if err == nil {
-				thumbnailImage.Resource = thumbnail
-				thumbnailImage.Refresh()
-			} else {
-				log.Println("Error loading thumbnail:", err)
-			}
-
-			StatusText.SetText("Info fetched")
-			Progress.SetValue(100)
+			statusText.SetText("Info fetched")
+			progress.SetValue(100)
 		}()
 	})
 
-	downloadButton := widget.NewButton("Download", func() {
-		url := urlEntry.Text
-		selectedResolution := resolutionSelect.Selected
-
-		if url == "" || selectedResolution == "" {
-			dialog.ShowInformation("Error", "Incorrect URL or resolution", myWindow)
+	downloadVideoButton := widget.NewButton("Download", func() {
+		inputURL := urlEntry.Text
+		selectedDisplay := resolutionSelect.Selected
+		if inputURL == "" || selectedDisplay == "" {
+			dialog2.ShowInformation("Error", "Invalid URL or Resolution", window)
 			return
 		}
-
-		Progress.SetValue(0)
+		selectedFormatID, ok := resolutionFormatMap[selectedDisplay]
+		if !ok {
+			dialog2.ShowInformation("Error", "Selected format not found", window)
+			return
+		}
+		progress.SetValue(0)
 
 		go func() {
-			err := downloadVideo(url, downloadPath, selectedResolution, progressChan)
+			err := downloadVideo(inputURL, selectedFormatID, downloadPath, progressChan, statusText)
 			if err != nil {
-				dialog.ShowError(err, myWindow)
+				dialog2.ShowError(err, window)
 			} else {
-				dialog.ShowInformation("Success", "Video Downloaded", myWindow)
+				dialog2.ShowInformation("Success", "Video Downloaded", window)
 			}
 		}()
 	})
@@ -166,165 +174,183 @@ func main() {
 	separator := widget.NewSeparator()
 
 	leftSide := container.NewVBox(
-		widget.NewLabel("Paste YouTube link"),
+		widget.NewLabel("Paste video URL"),
 		urlEntry,
 		widget.NewSeparator(),
 		selectFolderButton,
 		downloadPathLabel,
-		formatSelect,
-		resolutionSelect,
-		downloadButton,
-		fetchVideoInfoButton,
 		widget.NewSeparator(),
-		Progress,
-		StatusText,
+		formatSelect,
+		widget.NewSeparator(),
+		container.NewHBox(videoCheck, audioCheck, storyboardCheck),
+		resolutionSelect,
+		downloadVideoButton,
+		getVideoInfoButton,
+		widget.NewSeparator(),
+		progress,
+		progressText,
+		statusText,
 	)
 
 	rightSide := container.NewVBox(
 		thumbnailImage,
 		videoTitle,
 		separator,
-		scrollableDescription,
+		description,
 	)
 
-	myWindow.SetContent(
-		container.NewHSplit(leftSide, rightSide),
-	)
-
-	myWindow.Resize(fyne.NewSize(800, 600))
-	myWindow.SetFixedSize(true)
-	myWindow.ShowAndRun()
+	window.SetContent(container.NewHSplit(leftSide, rightSide))
+	window.Resize(fyne.NewSize(800, 600))
+	window.SetFixedSize(true)
+	window.ShowAndRun()
 }
 
-func downloadVideo(url, downloadPath, resolution string, progressChan chan float64) error {
-	args := []string{
-		"-f", fmt.Sprintf("bestvideo[height=%s]+bestaudio/best", resolution),
-		"-o", filepath.Join(downloadPath, "%(title)s.%(ext)s"),
-		"--no-check-certificate",
-		url,
+func updateResolutionList(info *VideoInfo, includeVideo, includeAudio, includeStoryboard bool, sel *widget.Select) {
+	resolutionFormatMap = make(map[string]string)
+	var options []string
+
+	if includeVideo {
+		for _, format := range info.VideoFormats {
+			if format.Width != nil && format.Height != nil {
+				fpsStr := "N/A"
+				if format.Fps != nil {
+					fpsStr = fmt.Sprintf("%.2f", *format.Fps)
+				}
+				vbrStr := "N/A"
+				if format.Vbr != nil {
+					vbrStr = fmt.Sprintf("%.2f", *format.Vbr)
+				}
+				display := fmt.Sprintf("Video: %s | FPS: %s | VBR: %s | Ext: %s", format.Resolution, fpsStr, vbrStr, format.Ext)
+				options = append(options, display)
+				resolutionFormatMap[display] = format.FormatID
+			}
+		}
 	}
 
-	cmd := exec.Command(ytDlp, args...)
-	log.Println("Running download command:", cmd)
+	if includeAudio {
+		for _, format := range info.AudioOnly {
+			abrStr := "N/A"
+			if format.Abr != nil {
+				abrStr = fmt.Sprintf("%.2f", *format.Abr)
+			}
+			display := fmt.Sprintf("Audio: ABR: %s | Ext: %s", abrStr, format.Ext)
+			options = append(options, display)
+			resolutionFormatMap[display] = format.FormatID
+		}
+	}
 
+	if includeStoryboard {
+		for _, format := range info.Storyboards {
+			display := fmt.Sprintf("Storyboard: %s | Ext: %s", format.Resolution, format.Ext)
+			options = append(options, display)
+			resolutionFormatMap[display] = format.FormatID
+		}
+	}
+
+	sel.Options = options
+	sel.Refresh()
+}
+
+func getVideoInfo(url string, info *VideoInfo) error {
+	cmd := exec.Command(ytdlp, "-j", "--quiet", "--no-warnings", url)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("error starting download: %v", err)
+		return err
 	}
 
 	if err := cmd.Start(); err != nil {
-		log.Println("Error starting download:", err)
-		return fmt.Errorf("error starting download: %v", err)
+		return err
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	re := regexp.MustCompile(`(\d{1,3}\.\d+)%`)
+	decoder := json.NewDecoder(stdout)
+	if err := decoder.Decode(info); err != nil && err != io.EOF {
+		return err
+	}
 
+	// Sortowanie formatów
+	for _, format := range info.Formats {
+		if format.Resolution == "audio only" {
+			info.AudioOnly = append(info.AudioOnly, format)
+		} else if format.Width == nil || format.Height == nil {
+			info.Storyboards = append(info.Storyboards, format)
+		} else {
+			info.VideoFormats = append(info.VideoFormats, format)
+		}
+	}
+
+	fmt.Printf("Video ID: %s\nTitle: %s\n", info.ID, info.Title)
+	return cmd.Wait()
+}
+
+func splitCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+func downloadVideo(url, formatID, downloadPath string, progressChan chan float64, statusText *widget.Label) error {
+	formatOption := formatID
+	outputPath := filepath.Join(downloadPath, "%(title)s.%(ext)s")
+	log.Printf("Download format: %s", formatOption)
+	log.Printf("Output Path: %s", outputPath)
+	args := []string{
+		"-o", outputPath,
+		"-f", formatOption,
+		"--no-check-certificate",
+		"--merge-output-format", "mp4",
+		url,
+	}
+	cmd := exec.Command(ytdlp, args...)
+	log.Printf("Running command: %v", cmd)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("error has occurred: %s", err)
+	}
+	if err := cmd.Start(); err != nil {
+		log.Printf("Error has occurred: %s", err)
+		return fmt.Errorf("error has occurred: %v", err)
+	}
+	re := regexp.MustCompile(`(?i)\[download\]\s+(\d+(?:\.\d+)?)%\s+of\s+([\d.]+\s*[KMGT]iB)(?:\s+in\s+([\d:]+))?\s+at\s+([\d.]+\s*[KMGT]iB/s)(?:\s+ETA\s+([\d:]+))?`)
+	scanner := bufio.NewScanner(stdout)
+	scanner.Split(splitCRLF)
 	for scanner.Scan() {
 		line := scanner.Text()
+		log.Println(line)
 		matches := re.FindStringSubmatch(line)
-		if len(matches) > 0 {
-			progressPercent, _ := strconv.ParseFloat(matches[1], 64)
-			roundedProgress := math.Round(progressPercent)
-			progressChan <- roundedProgress / 100
+		if len(matches) >= 2 {
+			progressValue := matches[1]
+			totalSize := "Unknown"
+			speed := "Unknown"
+			eta := "Unknown"
+			if len(matches) >= 3 && strings.TrimSpace(matches[2]) != "" {
+				totalSize = matches[2]
+			}
+			if len(matches) >= 5 && strings.TrimSpace(matches[4]) != "" {
+				speed = matches[4]
+			}
+			if len(matches) >= 6 && strings.TrimSpace(matches[5]) != "" {
+				eta = matches[5]
+			}
+			statusText.SetText(fmt.Sprintf("Progress: %s%% | Total: %s | Speed: %s | ETA: %s", progressValue, totalSize, speed, eta))
+			prog, err := strconv.ParseFloat(progressValue, 64)
+			if err == nil {
+				progressChan <- prog / 100.0
+			}
+		} else {
+			log.Println("Skipping line:", line)
 		}
 	}
-
 	if err := cmd.Wait(); err != nil {
-		log.Println("Download error:", err)
-		return fmt.Errorf("error during download: %v", err)
+		log.Println("Error has occurred: ", err)
+		return fmt.Errorf("error has occurred: %v", err)
 	}
-
-	log.Println("Download completed successfully")
+	log.Println("Finished downloading video.")
 	return nil
-}
-
-func getDefaultDownloadPath() string {
-	usr, err := user.Current()
-	if err != nil {
-		log.Fatal(err)
-	}
-	return filepath.Join(usr.HomeDir, "Downloads")
-}
-
-func getVideoInfo(url string) (videoInfo, error) {
-	cmd := exec.Command(ytDlp, "-j", "--skip-download", "--no-warnings", url)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return videoInfo{}, fmt.Errorf("error while running yt-dlp: %v, output: %s", err, string(output))
-	}
-
-	startIdx := bytes.IndexByte(output, '{')
-	endIdx := bytes.LastIndexByte(output, '}')
-	if startIdx == -1 || endIdx == -1 {
-		return videoInfo{}, fmt.Errorf("unable to locate JSON in output")
-	}
-
-	jsonData := output[startIdx : endIdx+1]
-
-	var info videoInfo
-	if err := json.Unmarshal(jsonData, &info); err != nil {
-		return videoInfo{}, fmt.Errorf("error while parsing information: %v\nRaw output:\n%s", err, string(jsonData))
-	}
-
-	return info, nil
-}
-
-func fetchAndConvertThumbnail(url string) (*fyne.StaticResource, error) {
-	response, err := http.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("error fetching thumbnail: %v", err)
-	}
-	defer response.Body.Close()
-
-	img, _, err := image.Decode(response.Body)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding image: %v", err)
-	}
-
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, nil); err != nil {
-		return nil, fmt.Errorf("error encoding image to jpeg: %v", err)
-	}
-
-	return fyne.NewStaticResource("thumbnail.jpg", buf.Bytes()), nil
-}
-
-func getAvailableFormats(url string) ([]ytDlpFormat, error) {
-	cmd := exec.Command("yt-dlp", "-j", "--skip-download", "--format-sort", "res,br", url)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("Error while downloading video information: %v, %s", err, string(output))
-	}
-
-	startIdx := bytes.IndexByte(output, '{')
-	endIdx := bytes.LastIndexByte(output, '}')
-	if startIdx == -1 || endIdx == -1 {
-		return nil, fmt.Errorf("unable to locate JSON in output")
-	}
-
-	jsonData := output[startIdx : endIdx+1]
-
-	var info videoInfo
-	if err := json.Unmarshal(jsonData, &info); err != nil {
-		return nil, fmt.Errorf("Error while parsing information: %v", err)
-	}
-	return info.Formats, nil
-}
-
-func getUniqueResolutions(formats []ytDlpFormat) []string {
-	resolutions := map[string]struct{}{}
-	for _, format := range formats {
-		if format.Resolution != "" {
-			resolutions[format.Resolution] = struct{}{}
-		}
-	}
-
-	sortedResolutions := make([]string, 0, len(resolutions))
-	for res := range resolutions {
-		sortedResolutions = append(sortedResolutions, res)
-	}
-
-	sort.Sort(sort.Reverse(sort.StringSlice(sortedResolutions)))
-	return sortedResolutions
 }

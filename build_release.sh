@@ -4,6 +4,7 @@ YT_DLP_DL="yt-dlp"
 YT_DLP="yt-dlp"
 GTG_NOUPX="GoTubeGUI-noupx"
 GTG_UPX="GoTubeGUI-upx"
+set GOOS=linux
 
 if [ "$GOOS" = "windows" ]; then
   LDFLAGS="$LDFLAGS -H=windowsgui"
