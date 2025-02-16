@@ -22,7 +22,6 @@ import (
 )
 
 var ytdlp = "./yt-dlp"
-var defaultURL = "https://www.youtube.com/watch?v=MXWSn8rMeEo&list=WL&index=9&t=184s"
 var resolutionFormatMap = make(map[string]string)
 
 type Format struct {
@@ -56,7 +55,7 @@ func main() {
 
 	urlEntry := widget.NewEntry()
 	urlEntry.SetPlaceHolder("Paste video URL")
-	urlEntry.SetText(defaultURL)
+	urlEntry.SetText("Paste video URL")
 	downloadPath, err := getDownloadPath()
 	if err != nil {
 		log.Fatal(err)
