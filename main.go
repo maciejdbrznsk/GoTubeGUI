@@ -258,6 +258,7 @@ func updateAudioQualityList(info *VideoInfo, sel *widget.Select) {
 func getVideoInfo(url string, info *VideoInfo) error {
 	cmd := exec.Command(ytdlp, "-j", "--quiet", "--no-warnings", url)
 	stdout, err := cmd.StdoutPipe()
+	cmd.SysProcAttr = getOSSysProcAttr()
 	if err != nil {
 		return err
 	}
@@ -310,6 +311,7 @@ func downloadMedia(url, formatID, downloadPath string, progressChan chan float64
 	args = append(args, url)
 	cmd := exec.Command(ytdlp, args...)
 	stdout, err := cmd.StdoutPipe()
+	cmd.SysProcAttr = getOSSysProcAttr()
 	if err != nil {
 		return fmt.Errorf("Error: %s", err)
 	}
