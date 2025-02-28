@@ -2,6 +2,7 @@
 yt-dlp*
 GoTubeGUI*
 upx*
+info.json
 
 # IDE files
 .idea/

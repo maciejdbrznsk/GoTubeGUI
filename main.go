@@ -65,7 +65,7 @@ func main() {
 	selectFolderButton := widget.NewButton("Select Folder", func() {
 		folder, err := dialog.Directory().Title("Select Folder").Browse()
 		if err != nil {
-			log.Println("Error:", err)
+			log.Fatal("Error:", err)
 			return
 		}
 		downloadPath = folder
@@ -102,6 +102,7 @@ func main() {
 		}
 		fileFormatSelect.Refresh()
 	}
+
 	mediaTypeRadio.OnChanged = func(selected string) {
 		if selected == "Video" {
 			videoQualitySelect.Show()
@@ -313,10 +314,10 @@ func downloadMedia(url, formatID, downloadPath string, progressChan chan float64
 	stdout, err := cmd.StdoutPipe()
 	cmd.SysProcAttr = getOSSysProcAttr()
 	if err != nil {
-		return fmt.Errorf("Error: %s", err)
+		return fmt.Errorf("error: %s", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("Error: %v", err)
+		return fmt.Errorf("error: %v", err)
 	}
 	re := regexp.MustCompile(`(?i)\[download]\s+(\d+(?:\.\d+)?)%\s+of\s+(?:~\s+)?([\d.]+\s*[KMGT]iB)(?:\s+in\s+([\d:]+))?\s+at\s+([\d.]+\s*[KMGT]iB/s)(?:\s+ETA\s+([\d:]+))?`)
 	scanner := bufio.NewScanner(stdout)
@@ -345,7 +346,7 @@ func downloadMedia(url, formatID, downloadPath string, progressChan chan float64
 		}
 	}
 	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("Error: %v", err)
+		return fmt.Errorf("error: %v", err)
 	}
 	return nil
 }

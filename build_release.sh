@@ -21,14 +21,6 @@ fi
 
 mkdir -p release-out
 
-# Download yt-dlp
-# TODO: This should be handled by GoTubeGUI itself!!!
-if [ ! -f "release-out/$YT_DLP" ]; then
-  echo "$YT_DLP doesn't exist, downloading..."
-  curl -L "https://github.com/yt-dlp/yt-dlp/releases/download/2024.11.04/$YT_DLP_DL" -o "release-out/$YT_DLP"
-fi
-
-
 echo "Building $GTG_NOUPX"
 go build -ldflags "$LDFLAGS" -o "release-out/$GTG_NOUPX"
 
