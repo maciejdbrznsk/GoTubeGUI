@@ -146,6 +146,7 @@ func main() {
 		}
 		progress.SetValue(0)
 		mediaType := mediaTypeRadio.Selected
+
 		go func() {
 			if mediaType == "Video" {
 				if videoQualitySelect.Selected == "" {
@@ -171,7 +172,7 @@ func main() {
 				} else {
 					dialog2.ShowInformation("Success", "Audio downloaded", window)
 				}
-			} else if mediaType == "Video+Audio" {
+			} else {
 				if videoQualitySelect.Selected == "" || audioQualitySelect.Selected == "" {
 					dialog2.ShowInformation("Error", "Select both video and audio quality", window)
 					return
